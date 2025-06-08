@@ -5,7 +5,7 @@ from kafka.admin import KafkaAdminClient, NewTopic
 from kafka.errors import TopicAlreadyExistsError
 from kafka.producer import KafkaProducer
 
-KAFKA_BROKER = "kafka:9092"
+KAFKA_BROKER = "localhost:9092"
 TOPIC_NAME = "my-test-topic"
 
 
