@@ -1,0 +1,10 @@
+{
+    "connector.class": "org.apache.kafka.connect.file.FileStreamSinkConnector",
+    "consumer.override.auto.offset.reset": "earliest",
+    "tasks.max": "1",
+    "topics": "test-nested",
+    "file": "/tmp/data/test-nested.jsonl",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter": "org.apache.kafka.connect.storage.StringConverter"
+}

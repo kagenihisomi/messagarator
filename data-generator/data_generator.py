@@ -7,6 +7,7 @@ from kafka.producer import KafkaProducer
 
 KAFKA_BROKER = "localhost:9092"
 TOPIC_NAME = "my-test-topic"
+NESTED_TOPIC_NAME = "test-nested"  # New topic for nested data
 
 
 def create_topic_if_not_exists(admin_client, topic_name):
@@ -33,6 +34,7 @@ def main():
             print(f"Attempting to connect to Kafka ({i+1}/{retries})...")
             admin = KafkaAdminClient(bootstrap_servers=KAFKA_BROKER)
             create_topic_if_not_exists(admin, TOPIC_NAME)
+            create_topic_if_not_exists(admin, NESTED_TOPIC_NAME)  # Create the new topic
 
             producer = KafkaProducer(
                 bootstrap_servers=KAFKA_BROKER,
@@ -53,7 +55,9 @@ def main():
         return
 
     message_id = 0
+    nested_message_id = 0
     while True:
+        # Send to the original topic
         message = {
             "id": message_id,
             "data": f"Sample data point {random.randint(1, 100)}",
@@ -61,21 +65,50 @@ def main():
         }
         try:
             producer.send(TOPIC_NAME, value=message)
-            print(f"Sent: {message}")
+            print(f"Sent to {TOPIC_NAME}: {message}")
             message_id += 1
-            time.sleep(random.uniform(0.5, 2.0))  # Send messages at random intervals
         except Exception as e:
-            print(f"Error sending message: {e}")
+            print(f"Error sending message to {TOPIC_NAME}: {e}")
+            # Attempt to reconnect or handle error (simplified for brevity)
+            time.sleep(5)
+            # Consider re-initializing producer here if connection is lost
+
+        # Send to the nested topic
+        nested_message = {
+            "event_id": f"event_{nested_message_id}",
+            "event_type": random.choice(["user_login", "item_viewed", "order_placed"]),
+            "timestamp": time.time(),
+            "user_details": {
+                "user_id": f"user_{random.randint(1000, 2000)}",
+                "session_id": f"session_{random.getrandbits(32)}",
+                "attributes": {
+                    "is_premium": random.choice([True, False]),
+                    "country_code": random.choice(["US", "CA", "GB", "DE"]),
+                },
+            },
+            "event_data": {
+                "item_id": (
+                    f"item_{random.randint(1, 500)}" if random.random() > 0.3 else None
+                ),
+                "page_url": f"/page/{random.randint(1,10)}.html",
+                "value": (
+                    round(random.uniform(5.0, 500.0), 2)
+                    if random.random() > 0.5
+                    else None
+                ),
+            },
+            "source_ip": f"192.168.{random.randint(0,255)}.{random.randint(0,255)}",
+        }
+        try:
+            producer.send(NESTED_TOPIC_NAME, value=nested_message)
+            print(f"Sent to {NESTED_TOPIC_NAME}: {nested_message}")
+            nested_message_id += 1
+        except Exception as e:
+            print(f"Error sending message to {NESTED_TOPIC_NAME}: {e}")
             # Attempt to reconnect or handle error
             time.sleep(5)
-            try:
-                producer = KafkaProducer(
-                    bootstrap_servers=KAFKA_BROKER,
-                    value_serializer=lambda v: json.dumps(v).encode("utf-8"),
-                )
-            except Exception as recon_e:
-                print(f"Failed to reconnect producer: {recon_e}")
-                break  # Exit loop if reconnect fails
+
+        time.sleep(random.uniform(0.5, 2.0))  # Send messages at random intervals
 
 
 if __name__ == "__main__":
