@@ -1,0 +1,20 @@
+{
+    "connector.class": "io.confluent.connect.jdbc.JdbcSinkConnector",
+    "tasks.max": "1",
+    "topics": "test-nested",
+    "connection.url": "jdbc:postgresql://postgres:5432/mydatabase",
+    "connection.user": "postgres",
+    "connection.password": "password",
+    "insert.mode": "upsert",
+    "pk.mode": "record_value",
+    "pk.fields": "event_id",
+    "auto.create": "true",
+    "auto.evolve": "true",
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "value.converter": "io.confluent.connect.json.JsonSchemaConverter",
+    "value.converter.schema.registry.url": "http://schema-registry:8081",
+    "value.converter.schemas.enable": "true",
+    "transforms": "flatten",
+    "transforms.flatten.type": "org.apache.kafka.connect.transforms.Flatten$Value",
+    "transforms.flatten.delimiter": "_"
+}

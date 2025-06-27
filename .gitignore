@@ -2,3 +2,5 @@
 kafka/*logs*
 data/
 monitoring/
+
+postgres-data
