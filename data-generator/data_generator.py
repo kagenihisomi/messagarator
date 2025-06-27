@@ -4,17 +4,68 @@ import random
 from kafka.admin import KafkaAdminClient, NewTopic
 from kafka.errors import TopicAlreadyExistsError
 from kafka.producer import KafkaProducer
+from pydantic import BaseModel, Field
+from typing import Optional, Dict, Any, Union
 
 KAFKA_BROKER = "localhost:9092"
 TOPIC_NAME = "my-test-topic"
-NESTED_TOPIC_NAME = "test-nested"  # New topic for nested data
-FLAKY_TOPIC_NAME = "flaky-topic"  # New topic for potentially invalid JSON
+NESTED_TOPIC_NAME = "test-nested"
+FLAKY_TOPIC_NAME = "flaky-topic"
+
+
+# Define Pydantic models for message schemas
+class SimpleMessage(BaseModel):
+    id: int
+    data: str
+    timestamp: float
+
+
+class UserAttributes(BaseModel):
+    is_premium: bool
+    country_code: str
+
+
+class UserDetails(BaseModel):
+    user_id: str
+    session_id: str
+    attributes: UserAttributes
+
+
+class EventData(BaseModel):
+    item_id: Optional[str] = None
+    page_url: str
+    value: Optional[float] = None
+
+
+class NestedMessage(BaseModel):
+    event_id: str
+    event_type: str
+    timestamp: float
+    user_details: UserDetails
+    event_data: EventData
+    source_ip: str
+
+
+class ValidFlakyMessage(BaseModel):
+    id: int
+    status: str
+    data: str
+    timestamp: float
+    nested_object: Dict[str, Any]
 
 
 def custom_value_serializer(v):
     if isinstance(v, bytes):
         return v  # If it's already bytes, pass it through
+    if isinstance(v, BaseModel):
+        return json.dumps(v.model_dump()).encode("utf-8")
     return json.dumps(v).encode("utf-8")  # Otherwise, dump to JSON and encode
+
+
+def custom_key_serializer(k):
+    if k is None:
+        return None
+    return str(k).encode("utf-8")
 
 
 def create_topic_if_not_exists(admin_client, topic_name):
@@ -32,51 +83,57 @@ def create_topic_if_not_exists(admin_client, topic_name):
 
 
 def send_to_topic_name(producer, message_id):
-    message = {
-        "id": message_id,
-        "data": f"Sample data point {random.randint(1, 100)}",
-        "timestamp": time.time(),
-    }
+    message = SimpleMessage(
+        id=message_id,
+        data=f"Sample data point {random.randint(1, 100)}",
+        timestamp=time.time(),
+    )
     try:
-        producer.send(TOPIC_NAME, value=message)
-        print(f"Sent to {TOPIC_NAME}: {message}")
+        producer.send(TOPIC_NAME, key=message.id, value=message)
+        print(f"Sent to {TOPIC_NAME}: {message.model_dump()}")
         message_id += 1
     except Exception as e:
-        print(f"Error sending message to {TOPIC_NAME}: {e}")
+        print(
+            f"Error sending message to {TOPIC_NAME}: {str(e) or 'No error details available'}"
+        )
+        print(f"Exception type: {type(e)}")
         time.sleep(5)
     return message_id
 
 
-def send_to_nested_topic(producer, nested_message_id):
-    nested_message = {
-        "event_id": f"event_{nested_message_id}",
-        "event_type": random.choice(["user_login", "item_viewed", "order_placed"]),
-        "timestamp": time.time(),
-        "user_details": {
-            "user_id": f"user_{random.randint(1000, 2000)}",
-            "session_id": f"session_{random.getrandbits(32)}",
-            "attributes": {
-                "is_premium": random.choice([True, False]),
-                "country_code": random.choice(["US", "CA", "GB", "DE"]),
-            },
-        },
-        "event_data": {
-            "item_id": (
-                f"item_{random.randint(1, 500)}" if random.random() > 0.3 else None
+def send_to_nested_topic(producer: KafkaProducer, nested_message_id):
+    event_id = f"event_{nested_message_id}"
+    nested_message = NestedMessage(
+        event_id=event_id,
+        event_type=random.choice(["user_login", "item_viewed", "order_placed"]),
+        timestamp=time.time(),
+        user_details=UserDetails(
+            user_id=f"user_{random.randint(1000, 2000)}",
+            session_id=f"session_{random.getrandbits(32)}",
+            attributes=UserAttributes(
+                is_premium=random.choice([True, False]),
+                country_code=random.choice(["US", "CA", "GB", "DE"]),
             ),
-            "page_url": f"/page/{random.randint(1,10)}.html",
-            "value": (
+        ),
+        event_data=EventData(
+            item_id=f"item_{random.randint(1, 500)}" if random.random() > 0.3 else None,
+            page_url=f"/page/{random.randint(1,10)}.html",
+            value=(
                 round(random.uniform(5.0, 500.0), 2) if random.random() > 0.5 else None
             ),
-        },
-        "source_ip": f"192.168.{random.randint(0,255)}.{random.randint(0,255)}",
-    }
+        ),
+        source_ip=f"192.168.{random.randint(0,255)}.{random.randint(0,255)}",
+    )
+
     try:
-        producer.send(NESTED_TOPIC_NAME, value=nested_message)
-        print(f"Sent to {NESTED_TOPIC_NAME}: {nested_message}")
+        producer.send(NESTED_TOPIC_NAME, key=event_id, value=nested_message)
+        print(f"Sent to {NESTED_TOPIC_NAME}: {nested_message.model_dump()}")
         nested_message_id += 1
     except Exception as e:
-        print(f"Error sending message to {NESTED_TOPIC_NAME}: {e}")
+        print(
+            f"Error sending message to {NESTED_TOPIC_NAME}: {str(e) or 'No error details available'}"
+        )
+        print(f"Exception type: {type(e)}")
         time.sleep(5)
     return nested_message_id
 
@@ -106,23 +163,26 @@ def send_to_flaky_topic(producer, flaky_message_id):
                 payload_str = '"This is a valid JSON string, but perhaps not what a consumer expecting an object wants."'
 
             payload_bytes = payload_str.encode("utf-8")
-            producer.send(FLAKY_TOPIC_NAME, value=payload_bytes)
+            producer.send(FLAKY_TOPIC_NAME, key=flaky_message_id, value=payload_bytes)
             print(
                 f"Sent INVALID to {FLAKY_TOPIC_NAME} (type: {malformed_type}): {payload_str}"
             )
         else:
-            payload_dict = {
-                "id": flaky_message_id,
-                "status": "valid",
-                "data": f"Some good data {random.randint(1, 100)}",
-                "timestamp": time.time(),
-                "nested_object": {"key1": "value1", "key2": random.random()},
-            }
-            producer.send(FLAKY_TOPIC_NAME, value=payload_dict)
-            print(f"Sent VALID to {FLAKY_TOPIC_NAME}: {payload_dict}")
+            valid_message = ValidFlakyMessage(
+                id=flaky_message_id,
+                status="valid",
+                data=f"Some good data {random.randint(1, 100)}",
+                timestamp=time.time(),
+                nested_object={"key1": "value1", "key2": random.random()},
+            )
+            producer.send(FLAKY_TOPIC_NAME, key=valid_message.id, value=valid_message)
+            print(f"Sent VALID to {FLAKY_TOPIC_NAME}: {valid_message.model_dump()}")
         flaky_message_id += 1
     except Exception as e:
-        print(f"Error sending message to {FLAKY_TOPIC_NAME}: {e}")
+        print(
+            f"Error sending message to {FLAKY_TOPIC_NAME}: {str(e) or 'No error details available'}"
+        )
+        print(f"Exception type: {type(e)}")
         time.sleep(5)
     return flaky_message_id
 
@@ -144,6 +204,7 @@ def main():
 
             producer = KafkaProducer(
                 bootstrap_servers=KAFKA_BROKER,
+                key_serializer=custom_key_serializer,
                 value_serializer=custom_value_serializer,  # Use the custom serializer
             )
             print("Successfully connected to Kafka and topic is ready.")
